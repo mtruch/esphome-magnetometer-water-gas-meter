@@ -128,6 +128,34 @@ globals:
     type: float
     restore_value: false
 
+  #Diagnostic 5 minute max/min values
+  - id: ${prefix_id}x_min
+    type: float
+    restore_value: false
+    initial_value: 'std::numeric_limits<float>::max()'
+  - id: ${prefix_id}x_max
+    type: float
+    restore_value: false
+    initial_value: 'std::numeric_limits<float>::lowest()'
+    
+  - id: ${prefix_id}y_min
+    type: float
+    restore_value: false
+    initial_value: 'std::numeric_limits<float>::max()'
+  - id: ${prefix_id}y_max
+    type: float
+    restore_value: false
+    initial_value: 'std::numeric_limits<float>::lowest()'
+    
+  - id: ${prefix_id}z_min
+    type: float
+    restore_value: false
+    initial_value: 'std::numeric_limits<float>::max()'
+  - id: ${prefix_id}z_max
+    type: float
+    restore_value: false
+    initial_value: 'std::numeric_limits<float>::lowest()'
+
 number:
   - platform: template
     id: ${prefix_id}volume_per_half_rotation
@@ -466,6 +494,9 @@ sensor:
                 id(${prefix_id}calibrating_axis_x_min) = min(id(${prefix_id}calibrating_axis_x_min), x);
                 id(${prefix_id}calibrating_axis_x_max) = max(id(${prefix_id}calibrating_axis_x_max), x);
               }
+              // Update 1-minute diagnostics
+              id(${prefix_id}x_min) = min(id(${prefix_id}x_min), x);
+              id(${prefix_id}x_max) = max(id(${prefix_id}x_max), x);
       filters:
         - delta: ${magnetic_field_update_delta}
     ${axis_y_key}:
@@ -481,6 +512,9 @@ sensor:
                 id(${prefix_id}calibrating_axis_y_min) = min(id(${prefix_id}calibrating_axis_y_min), x);
                 id(${prefix_id}calibrating_axis_y_max) = max(id(${prefix_id}calibrating_axis_y_max), x);
               }
+              // Update 1-minute diagnostics
+              id(${prefix_id}y_min) = min(id(${prefix_id}y_min), x);
+              id(${prefix_id}y_max) = max(id(${prefix_id}y_max), x);
       filters:
         - delta: ${magnetic_field_update_delta}
     ${axis_z_key}:
@@ -496,6 +530,9 @@ sensor:
                 id(${prefix_id}calibrating_axis_z_min) = min(id(${prefix_id}calibrating_axis_z_min), x);
                 id(${prefix_id}calibrating_axis_z_max) = max(id(${prefix_id}calibrating_axis_z_max), x);
               }
+              // Update 1-minute diagnostics
+              id(${prefix_id}z_min) = min(id(${prefix_id}z_min), x);
+              id(${prefix_id}z_max) = max(id(${prefix_id}z_max), x);
       filters:
         - delta: ${magnetic_field_update_delta}
     temperature:
@@ -583,3 +620,76 @@ sensor:
       - or:
           - throttle: 60s
           - delta: 0
+
+  # 1-Minute Diagnostic Output Sensors
+  - platform: template
+    id: ${prefix_id}diag_x_min
+    name: ${prefix_name}X Axis 1min Min
+    entity_category: diagnostic
+    unit_of_measurement: µT
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      float val = id(${prefix_id}x_min);
+      id(${prefix_id}x_min) = std::numeric_limits<float>::max(); // Reset tracker
+      return val;
+
+  - platform: template
+    id: ${prefix_id}diag_x_max
+    name: ${prefix_name}X Axis 1min Max
+    entity_category: diagnostic
+    unit_of_measurement: µT
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      float val = id(${prefix_id}x_max);
+      id(${prefix_id}x_max) = std::numeric_limits<float>::lowest(); // Reset tracker
+      return val;
+
+  - platform: template
+    id: ${prefix_id}diag_y_min
+    name: ${prefix_name}Y Axis 1min Min
+    entity_category: diagnostic
+    unit_of_measurement: µT
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      float val = id(${prefix_id}y_min);
+      id(${prefix_id}y_min) = std::numeric_limits<float>::max(); // Reset tracker
+      return val;
+
+  - platform: template
+    id: ${prefix_id}diag_y_max
+    name: ${prefix_name}Y Axis 1min Max
+    entity_category: diagnostic
+    unit_of_measurement: µT
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      float val = id(${prefix_id}y_max);
+      id(${prefix_id}y_max) = std::numeric_limits<float>::lowest(); // Reset tracker
+      return val;
+
+  - platform: template
+    id: ${prefix_id}diag_z_min
+    name: ${prefix_name}Z Axis 1min Min
+    entity_category: diagnostic
+    unit_of_measurement: µT
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      float val = id(${prefix_id}z_min);
+      id(${prefix_id}z_min) = std::numeric_limits<float>::max(); // Reset tracker
+      return val;
+
+  - platform: template
+    id: ${prefix_id}diag_z_max
+    name: ${prefix_name}Z Axis 1min Max
+    entity_category: diagnostic
+    unit_of_measurement: µT
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      float val = id(${prefix_id}z_max);
+      id(${prefix_id}z_max) = std::numeric_limits<float>::lowest(); // Reset tracker
+      return val;
