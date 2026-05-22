@@ -128,7 +128,7 @@ globals:
     type: float
     restore_value: false
 
-  #Diagnostic 5 minute max/min values
+  #Diagnostic 1 minute max/min values
   - id: ${prefix_id}x_min
     type: float
     restore_value: false
@@ -621,75 +621,75 @@ sensor:
           - throttle: 60s
           - delta: 0
 
-  # 1-Minute Diagnostic Output Sensors
+# 1-Minute Diagnostic Delta Output Sensors
   - platform: template
-    id: ${prefix_id}diag_x_min
-    name: ${prefix_name}X Axis 1min Min
+    id: ${prefix_id}sensor_x_delta
+    name: ${prefix_name}X Axis 1min Delta
     entity_category: diagnostic
     unit_of_measurement: µT
     accuracy_decimals: 1
     update_interval: 60s
     lambda: |-
-      float val = id(${prefix_id}x_min);
-      id(${prefix_id}x_min) = std::numeric_limits<float>::max(); // Reset tracker
-      return val;
+      float minimum = id(${prefix_id}x_min);
+      float maximum = id(${prefix_id}x_max);
+      
+      // Reset global trackers immediately for the next minute cycle
+      id(${prefix_id}x_min) = std::numeric_limits<float>::max();
+      id(${prefix_id}x_max) = std::numeric_limits<float>::lowest();
+      
+      // Calculate absolute difference
+      float delta = std::abs(maximum - minimum);
+      
+      // Sanity Check: If uninitialized, a flatline, or over 10,000 µT (0.01 Tesla), report NaN
+      if (minimum == std::numeric_limits<float>::max() || 
+          maximum == std::numeric_limits<float>::lowest() || 
+          delta > 10000.0) {
+        return NAN;
+      }
+      return delta;
 
   - platform: template
-    id: ${prefix_id}diag_x_max
-    name: ${prefix_name}X Axis 1min Max
+    id: ${prefix_id}sensor_y_delta
+    name: ${prefix_name}Y Axis 1min Delta
     entity_category: diagnostic
     unit_of_measurement: µT
     accuracy_decimals: 1
     update_interval: 60s
     lambda: |-
-      float val = id(${prefix_id}x_max);
-      id(${prefix_id}x_max) = std::numeric_limits<float>::lowest(); // Reset tracker
-      return val;
+      float minimum = id(${prefix_id}y_min);
+      float maximum = id(${prefix_id}y_max);
+      
+      id(${prefix_id}y_min) = std::numeric_limits<float>::max();
+      id(${prefix_id}y_max) = std::numeric_limits<float>::lowest();
+      
+      float delta = std::abs(maximum - minimum);
+      
+      if (minimum == std::numeric_limits<float>::max() || 
+          maximum == std::numeric_limits<float>::lowest() || 
+          delta > 10000.0) {
+        return NAN;
+      }
+      return delta;
 
   - platform: template
-    id: ${prefix_id}diag_y_min
-    name: ${prefix_name}Y Axis 1min Min
+    id: ${prefix_id}sensor_z_delta
+    name: ${prefix_name}Z Axis 1min Delta
     entity_category: diagnostic
     unit_of_measurement: µT
     accuracy_decimals: 1
     update_interval: 60s
     lambda: |-
-      float val = id(${prefix_id}y_min);
-      id(${prefix_id}y_min) = std::numeric_limits<float>::max(); // Reset tracker
-      return val;
-
-  - platform: template
-    id: ${prefix_id}diag_y_max
-    name: ${prefix_name}Y Axis 1min Max
-    entity_category: diagnostic
-    unit_of_measurement: µT
-    accuracy_decimals: 1
-    update_interval: 60s
-    lambda: |-
-      float val = id(${prefix_id}y_max);
-      id(${prefix_id}y_max) = std::numeric_limits<float>::lowest(); // Reset tracker
-      return val;
-
-  - platform: template
-    id: ${prefix_id}diag_z_min
-    name: ${prefix_name}Z Axis 1min Min
-    entity_category: diagnostic
-    unit_of_measurement: µT
-    accuracy_decimals: 1
-    update_interval: 60s
-    lambda: |-
-      float val = id(${prefix_id}z_min);
-      id(${prefix_id}z_min) = std::numeric_limits<float>::max(); // Reset tracker
-      return val;
-
-  - platform: template
-    id: ${prefix_id}diag_z_max
-    name: ${prefix_name}Z Axis 1min Max
-    entity_category: diagnostic
-    unit_of_measurement: µT
-    accuracy_decimals: 1
-    update_interval: 60s
-    lambda: |-
-      float val = id(${prefix_id}z_max);
-      id(${prefix_id}z_max) = std::numeric_limits<float>::lowest(); // Reset tracker
-      return val;
+      float minimum = id(${prefix_id}z_min);
+      float maximum = id(${prefix_id}z_max);
+      
+      id(${prefix_id}z_min) = std::numeric_limits<float>::max();
+      id(${prefix_id}z_max) = std::numeric_limits<float>::lowest();
+      
+      float delta = std::abs(maximum - minimum);
+      
+      if (minimum == std::numeric_limits<float>::max() || 
+          maximum == std::numeric_limits<float>::lowest() || 
+          delta > 10000.0) {
+        return NAN;
+      }
+      return delta;
