@@ -41,7 +41,7 @@ packages:
 
 The magnetometer is used to read the rotating magnet inside your water meter.
 
-This should be compatible will all the water meters the Flume water sensor is compatible with, which is [compatible](https://help.flumewater.com/en/articles/1618594-is-the-flume-device-compatible-with-all-water-meters) with about 95% of water meters in the United States.
+This should be compatible with all the water meters the Flume water sensor is compatible with, which is [compatible](https://help.flumewater.com/en/articles/1618594-is-the-flume-device-compatible-with-all-water-meters) with about 95% of water meters in the United States.
 
 To verify compatibility follow [this](https://help.flumewater.com/en/articles/1618594-is-the-flume-device-compatible-with-all-water-meters). Alternatively, install the Sensors app on your phone, place your phone next to the meter, and see if the Geomagnetic Field sensors are changing while water is running.
 
@@ -88,7 +88,7 @@ To verify compatibility install the Sensors app on your phone, place your phone 
   - I used 32.8ft or 10m direct burial CAT6. A user has reported they successfully used 75ft or 22.9m direct burial CAT6.
   - CAT6 is preferred because of its lower capacitance. CAT5 50ft or 15m [should work](https://www.youtube.com/watch?v=6v1KZBRZRCI). For 100ft you will need an active terminator such as [LTC4311](https://www.youtube.com/watch?v=nhWPxO7jx_o).
   - Do not use thermostat wire, bell wire, or any other low voltage wire. You will have communication errors or instability. You really need to be using twisted pair cables with proper shielding and lower capacitance such as CAT6.
-- Some way to weather proof the magnetometer. Some options:
+- Some way to weatherproof the magnetometer. Some options:
   - Adhesive 4:1 heat shrink tubing (this is what I used)
   - Liquid electrical tape
   - Silicone sealant
@@ -119,7 +119,7 @@ The ethernet cable has 4 twisted pairs of wires. Use any solid wire color for th
 
 ## Software installation
 
-1. Setup **ESPHome**, if you don't have it already, by following [Getting Started with ESPHome and Home Assistant](https://esphome.io/guides/getting_started_hassio.html).
+1. Set up **ESPHome**, if you don't have it already, by following [Getting Started with ESPHome and Home Assistant](https://esphome.io/guides/getting_started_hassio.html).
 2. In the **ESPHome Dashboard** select **New device**, **Continue**, give a name: e.g. Water meter, **Next**, select device type based on the ESP chip used e.g. ESP8266.
 3. In the **Configuration created!** page select **Skip** to skip installation for now until we make a few changes.
 4. Select **Edit** on the created configuration e.g. water-meter.yaml.
@@ -169,7 +169,7 @@ The ethernet cable has 4 twisted pairs of wires. Use any solid wire color for th
         refresh: 0s
     ```
 
-7. Change the values in the `substitutions` section based on your setting, e.g. if you have used different pins, or if you prefer a different unit.
+7. Change the values in the `substitutions` section based on your settings, e.g. if you have used different pins, or if you prefer a different unit.
 8. Your configuration should now look something like the following:
 
     ```yaml
@@ -238,18 +238,29 @@ The ethernet cable has 4 twisted pairs of wires. Use any solid wire color for th
 
 ### Detection Algorithm
 
-Two detection algorithms are available, controlled by the **"Detection algorithm"** select:
+Three detection algorithms are available, controlled by the **"Detection algorithm"** select:
 
 Algorithm | Best For
 --- | ---
-**Adaptive** (default) | **Recommended**. Handles temperature drift automatically
+**Quadrature** (default) | **Recommended**. Uses all 3 axes for direction-aware counting, thermal slosh rejection, and 4x faster low-flow leak detection
+**Adaptive** | Handles temperature drift automatically on the primary axis; supports 2x higher max flow rate
 **Threshold** | Backward compatibility with existing installations
 
-> **Recommendation:** Use the Adaptive algorithm. Threshold is available for backward compatibility with existing installations.
+> **Recommendation:** Use the Quadrature or Adaptive algorithm. Threshold is available for backward compatibility with existing installations.
+
+**Quadrature algorithm**:
+
+- Tracks all 3 axes (`x`, `y`, `z`) of a single magnetometer with per-axis adaptive min/max trackers and projects them onto the 2D magnet rotation plane (`I = cos`, `Q = sin`) via Gram–Schmidt orthogonalization and Maximal-Ratio Combining
+- Avoids the "top-2 amplitude" trap where the radial and vertical axes both vary as `cos` (in-phase or 180° anti-phase) while the true `sin` quadrature component is on the third axis or split across tilted axes
+- Works with a single sensor on any multipole magnet (unlike two-sensor setups placed 90° apart around the meter body, which land 180° out of phase on 4-pole magnets; see [Discussion #132](https://github.com/tronikos/esphome-magnetometer-water-gas-meter/discussions/132))
+- Decodes 4 evenly spaced 90° Gray-code steps per cycle: forward motion adds and reverse motion subtracts, so disc rocking from plumbing thermal expansion and contraction cancels out instead of accumulating as phantom usage
+- Commits 1 count per 4 net forward steps (keeping `volume_per_half_rotation` unchanged), clamps published `Total` to its high-water mark so Home Assistant's `total_increasing` statistics never see a decrease as a meter reset, updates `Flow` on every new forward 90° step for 4x faster slow-leak detection, and reports **Flow Direction** (`Forward`, `Reverse`, `Stopped`)
+- Automatically falls back to the 1-axis **Adaptive** algorithm if selected before 3-axis calibration or if secondary axes lack sufficient quadrature signal
+- Requires at least 4 samples per magnetic cycle (vs. 2 for Adaptive), which halves the maximum flow rate ceiling (~33–50 cycles/s at 200 Hz on ESP32, or ~32–47 GPM on a 3/4" Badger 35)
 
 **Adaptive algorithm**:
 
-- Automatically tracks and adapts to thermal drift
+- Automatically tracks and adapts to thermal drift on the primary axis
 - No recalibration needed when temperature changes
 - Uses a "Smart Min/Max Tracker" with window clamping and auto-centering
 
@@ -276,9 +287,10 @@ rotation at low flow, which is why the gas package defaults to 180.
 
 The system will automatically:
 
-- Detect the axis with the strongest signal
+- Detect the primary axis with the strongest signal
 - Set `Threshold lower` and `Threshold upper` (for threshold mode)
 - Set `Magnet Span` (for adaptive mode)
+- Measure all three axis spans, cross-axis phase correlations, and forward rotation direction (for quadrature mode)
 
 You can switch between algorithms at any time without recalibrating.
 
@@ -371,7 +383,7 @@ Place another temperature sensor next to the QMC5883L and adjust the temperature
 
 ### Water Running Too Long Alert
 
-In `Settings > Devices & services > Helpers` I have created a template sensor: `sensor.water_meter_flow_minus_irrigation` with the following state template: `{{ max(0, states('sensor.water_meter_flow') | float - (0.47 if now().hour in range(7, 10) else 0)) }}`. My irrigation system consumes 0.44 gal/min between 7 to 9 am or 8 to 10 am depending on DST. You will need to adjust this to your irrigation system flow and times. If you don't have irrigation you can skip this and use `sensor.water_meter_flow` below.
+In `Settings > Devices & services > Helpers` I have created a template sensor: `sensor.water_meter_flow_minus_irrigation` with the following state template: `{{ max(0, states('sensor.water_meter_flow') | float - (0.44 if now().hour in range(7, 10) else 0)) }}`. My irrigation system consumes 0.44 gal/min between 7 to 9 am or 8 to 10 am depending on DST. You will need to adjust this to your irrigation system flow and times. If you don't have irrigation you can skip this and use `sensor.water_meter_flow` below.
 
 I have also created a template **binary sensor**, `binary_sensor.water_meter_running_minus_irrigation`, with the state template `{{ states('sensor.water_meter_flow_minus_irrigation') | float(0) > 0 }}` and **no delay off**. The automation below reads its `last_changed` to know how long water has been running. Do not add a delay off unless you have measured your own usage: bridging the gaps between separate draws merges them into one long session and causes false alerts.
 
@@ -382,35 +394,44 @@ In `Settings > Automations` I have created the following automation to get notif
 # You MUST customize the following:
 # - The flow sensor and its matching "running" binary sensor
 # - The flow thresholds (2.5 and 1.5 below) and the durations
-# - The exception condition (e.g. is_state('light.bathroom_upstairs_lights', 'on'))
+# - The exception condition (e.g. bathroom lights with showers)
 # - The notification services
 
 alias: "Notify: water meter flow"
 description: Alerts if water runs for longer than the flow rate justifies.
 triggers:
-  # High flow: a burst pipe or a wide-open tap. Least patience.
   - trigger: template
+    note: >-
+      High flow (> 2.5 GPM): burst pipe or wide-open tap. Allow 3 min normally,
+      or 8 min when a shower bathroom light is on.
     value_template: >-
       {% set flow = states('sensor.water_meter_flow_minus_irrigation') | float(0) %}
-      {% set lights = is_state('light.bathroom_upstairs_lights', 'on') %}
+      {% set lights = is_state('light.bathroom_upstairs_lights', 'on')
+                      or is_state('light.bathroom_master_toilet_lights', 'on') %}
       {% set r = states.binary_sensor.water_meter_running_minus_irrigation %}
       {% set elapsed = ((as_timestamp(now()) - as_timestamp(r.last_changed)) / 60)
                        if (r is not none and r.state == 'on') else 0 %}
       {{ flow > 2.5 and ((not lights and elapsed >= 3) or (lights and elapsed >= 8)) }}
-  # Medium flow.
   - trigger: template
+    note: >-
+      Medium flow (1.5-2.5 GPM): shower or filling tub. Allow 5 min normally,
+      or 10 min when a shower bathroom light is on.
     value_template: >-
       {% set flow = states('sensor.water_meter_flow_minus_irrigation') | float(0) %}
-      {% set lights = is_state('light.bathroom_upstairs_lights', 'on') %}
+      {% set lights = is_state('light.bathroom_upstairs_lights', 'on')
+                      or is_state('light.bathroom_master_toilet_lights', 'on') %}
       {% set r = states.binary_sensor.water_meter_running_minus_irrigation %}
       {% set elapsed = ((as_timestamp(now()) - as_timestamp(r.last_changed)) / 60)
                        if (r is not none and r.state == 'on') else 0 %}
       {{ flow > 1.5 and flow <= 2.5 and ((not lights and elapsed >= 5) or (lights and elapsed >= 10)) }}
-  # Any flow at all, running far too long: a seeping toilet or a forgotten tap.
   - trigger: template
+    note: >-
+      Low continuous flow (<= 1.5 GPM): seeping toilet or forgotten tap.
+      Allow 15 min normally, or 20 min when a shower bathroom light is on.
     value_template: >-
       {% set flow = states('sensor.water_meter_flow_minus_irrigation') | float(0) %}
-      {% set lights = is_state('light.bathroom_upstairs_lights', 'on') %}
+      {% set lights = is_state('light.bathroom_upstairs_lights', 'on')
+                      or is_state('light.bathroom_master_toilet_lights', 'on') %}
       {% set r = states.binary_sensor.water_meter_running_minus_irrigation %}
       {% set elapsed = ((as_timestamp(now()) - as_timestamp(r.last_changed)) / 60)
                        if (r is not none and r.state == 'on') else 0 %}
@@ -420,6 +441,7 @@ actions:
   - variables:
       start_ts: >-
         {{ as_timestamp(states.binary_sensor.water_meter_running_minus_irrigation.last_changed) }}
+    note: Snapshot the start time of the continuous water run so alerts report total elapsed minutes.
   - repeat:
       until:
         - condition: numeric_state
@@ -453,6 +475,7 @@ actions:
               tts_text: Water flow alert
         - delay:
             seconds: 30
+    note: Repeat critical alert every 30 seconds until flow drops to zero.
 mode: single
 ```
 
@@ -496,7 +519,7 @@ WITH variables AS (
   -- All user-adjustable parameters are defined here for easy modification.
   SELECT
     1.5 AS flow_threshold,          -- The flow rate (e.g., in GPM or L/min) above which the water is considered "running".
-    0.47 AS irrigation_flow_reduction, -- The value to subtract from the flow rate during the irrigation window.
+    0.44 AS irrigation_flow_reduction, -- The value to subtract from the flow rate during the irrigation window.
     '07:00' AS irrigation_start_time,  -- The start time of the daily irrigation window (HH:MM).
     '10:00' AS irrigation_end_time    -- The end time of the daily irrigation window (HH:MM).
 ),
@@ -593,39 +616,122 @@ WHERE rank_num = 1
 ORDER BY run_day DESC;
 ```
 
+### Shower Length Reminder
+
+This automation dims the bathroom light to 1% after 3.5 minutes of shower-level flow as a gentle reminder to wrap up, then restores the previous brightness as soon as the water is turned off.
+
+```yaml
+alias: "Shower reminder: Master toilet"
+description: >-
+  Dims the master toilet light to 1% after 3.5 minutes of continuous shower-level
+  water flow, then restores the previous light brightness as soon as the water stops.
+triggers:
+  - trigger: template
+    note: >-
+      Trigger when the master toilet light is on, flow is at shower rate (> 0.8 GPM),
+      and water has been running continuously for at least 3.5 minutes.
+    value_template: >-
+      {% set flow = states('sensor.water_meter_flow_minus_irrigation') | float(0) %}
+      {% set lights = is_state('light.bathroom_master_toilet_lights', 'on') %}
+      {% set r = states.binary_sensor.water_meter_running_minus_irrigation %}
+      {% set elapsed = ((as_timestamp(now()) - as_timestamp(r.last_changed)) / 60)
+                       if (r is not none and r.state == 'on') else 0 %}
+      {{ lights and flow > 0.8 and elapsed >= 3.5 }}
+conditions: []
+actions:
+  - action: scene.create
+    note: Save current brightness and color so it can be restored when the shower ends.
+    data:
+      scene_id: master_toilet_before_shower_reminder
+      snapshot_entities:
+        - light.bathroom_master_toilet_lights
+  - action: light.turn_on
+    note: Dim to 1% instead of turning completely off so the shower isn't pitch black.
+    target:
+      entity_id: light.bathroom_master_toilet_lights
+    data:
+      brightness_pct: 1
+      transition: 2
+  - wait_for_trigger:
+      - trigger: numeric_state
+        entity_id: sensor.water_meter_flow_minus_irrigation
+        below: 0.3
+      - trigger: state
+        entity_id: light.bathroom_master_toilet_lights
+        to: "off"
+    timeout:
+      minutes: 15
+    note: Wait until the shower water is turned off (or the light is switched off manually).
+  - if:
+      - condition: state
+        entity_id: light.bathroom_master_toilet_lights
+        state: "on"
+    then:
+      - action: scene.turn_on
+        note: Restore the saved light brightness once the water stops.
+        target:
+          entity_id: scene.master_toilet_before_shower_reminder
+mode: single
+```
+
 ### Slow Leak Detection Automation
 
 This automation runs every 30 minutes and checks whether a small volume arrived spread across most of the last hour, which is what separates a leak from normal use: a drip touches nearly every 5-minute period, briefly running a sink touches one.
 
 ```yaml
 alias: "Notify: Slow Water Leak"
-description: Detects if water volume increased while flow rate remained low.
+description: Detects if water volume increased across most 5-minute periods while flow rate remained low.
 triggers:
   - trigger: time_pattern
     minutes: /30
+    note: Check every 30 minutes across the completed 1-hour window ending 10 minutes ago.
 actions:
   - action: sql.query
+    note: >-
+      Count 5-minute periods in the last hour that had small volume increases (<= 0.15 gal)
+      without any tap/appliance flow (>= 0.25 GPM) in that same 5-minute period.
     data:
       query: |-
         WITH b AS (
-          SELECT s."sum" - LAG(s."sum") OVER (ORDER BY s.start_ts) AS d
+          SELECT s.start_ts,
+                 s."sum" - LAG(s."sum") OVER (ORDER BY s.start_ts) AS d
             FROM statistics_short_term s
             JOIN statistics_meta m ON s.metadata_id = m.id
            WHERE m.statistic_id = 'sensor.water_meter_total'
              AND s.start_ts >= strftime('%s', 'now') - 4500
              AND s.start_ts <  strftime('%s', 'now') -  600
+        ),
+        f AS (
+          SELECT CAST(s.last_updated_ts / 300 AS INTEGER) * 300 AS bucket_ts,
+                 MAX(CAST(s.state AS REAL)) AS max_flow
+            FROM states s
+            JOIN states_meta sm ON s.metadata_id = sm.metadata_id
+           WHERE sm.entity_id = 'sensor.water_meter_flow'
+             AND s.last_updated_ts >= strftime('%s', 'now') - 4200
+             AND s.last_updated_ts <  strftime('%s', 'now') -  600
+             AND s.state NOT IN ('unknown', 'unavailable')
+           GROUP BY bucket_ts
         )
-        SELECT (SELECT SUM(d) FROM b) AS volume_delta,
-               (SELECT COUNT(*) FROM b WHERE d > 0) AS active_periods
+        SELECT (SELECT SUM(d) FROM b WHERE d > 0) AS volume_delta,
+               (SELECT COUNT(*) FROM b WHERE d > 0) AS active_periods,
+               (SELECT COUNT(*)
+                  FROM b
+                  LEFT JOIN f ON f.bucket_ts = CAST(b.start_ts AS INTEGER)
+                 WHERE b.d > 0
+                   AND b.d <= 0.15
+                   AND COALESCE(f.max_flow, 0) < 0.25) AS low_flow_periods
     response_variable: sql_result
   - if:
       - condition: template
+        note: >-
+          Require at least 8 of the 12 five-minute periods to have strictly low-flow usage
+          and total hourly volume under 1.5 gal.
         value_template: |-
           {% set row = sql_result['result'][0] %}
           {{
              row['volume_delta'] is not none and
-             0 < row['volume_delta'] < 1.0 and
-             row['active_periods'] >= 8
+             0 < row['volume_delta'] < 1.5 and
+             row['low_flow_periods'] >= 8
           }}
     then:
       - action: notify.nikos
@@ -633,17 +739,106 @@ actions:
           title: 💧 Slow Leak Detected
           message: >-
             {% set row = sql_result['result'][0] %} Usage in last hour: {{
-            row['volume_delta'] | round(3) }} gal, spread across {{
-            row['active_periods'] }} of 12 five-minute periods.
+            row['volume_delta'] | round(3) }} gal, with low-flow activity in {{
+            row['low_flow_periods'] }} of 12 five-minute periods.
 
-            This indicates a leak of approx {{ (row['volume_delta'] / 60) |
-            round(4) }} gal/min.
+            That is a continuous draw of roughly {{ (row['volume_delta'] / 60) |
+            round(4) }} gal/min ({{ (row['volume_delta'] * 24) | round(1) }} gal/day).
 mode: single
 ```
 
 - The window ends 10 minutes ago because the current 5-minute statistics period isn't compiled yet; without that the automation fires twice with identical numbers.
-- The upper volume bound keeps an hour of irrigation from lighting up every period.
+- The upper volume bound keeps an hour of irrigation from lighting up every period. It sits
+  above the lowest steady flow the automation above can see, so every steady leak is covered
+  by one or the other.
+- Each 5-minute period is checked against `sensor.water_meter_flow` in `states`: any 5-minute
+  period where a tap was opened (`>= 0.25` gal/min or `> 0.15` gal in 5 minutes) is excluded
+  from `low_flow_periods` without blinding the rest of the hour if a slow leak is also running.
 - The smallest leak this can find is about 8 counts an hour, so it scales with `volume_per_half_rotation` — roughly 3 gal/day on a 35 RCDL.
+
+### Overnight Water Use Alert
+
+A toilet that keeps refilling on its own runs for a few seconds at tap-like flow each time the
+tank drops, so the slow leak automation ignores those periods. This automation catches it by two
+other properties: it never stops, and nobody is in the bathroom. At 06:10 it counts the hours
+since midnight in which water ran with no bathroom light on (mine follow motion), and alerts if
+there were at least 5 of 6.
+
+```yaml
+alias: "Notify: Overnight water use"
+description: Alerts when water ran with no bathroom light on in most hours of the night.
+triggers:
+  - trigger: time
+    at: "06:10:00"
+    note: Run at 06:10 so the 05:55-06:00 statistics period has been compiled.
+actions:
+  - action: sql.query
+    note: >-
+      Count distinct hours between midnight and 6 am that had water flow without any
+      monitored bathroom light on within 2 minutes of the flow reading.
+    data:
+      query: |-
+        WITH p AS (SELECT CAST(strftime('%s','now') AS INTEGER) / 300 * 300 - 22200 AS ws),
+        f AS (
+          SELECT s.last_updated_ts AS t
+            FROM states s
+            JOIN states_meta sm ON s.metadata_id = sm.metadata_id, p
+           WHERE sm.entity_id = 'sensor.water_meter_flow'
+             AND s.last_updated_ts >= p.ws
+             AND s.last_updated_ts <  p.ws + 21600
+             AND CAST(s.state AS REAL) > 0
+        ),
+        l AS (
+          SELECT s.last_updated_ts AS a,
+                 LEAD(s.last_updated_ts, 1, 1e12)
+                   OVER (PARTITION BY s.metadata_id ORDER BY s.last_updated_ts) AS z,
+                 s.state AS st
+            FROM states s
+            JOIN states_meta sm ON s.metadata_id = sm.metadata_id, p
+           WHERE sm.entity_id IN ('light.bathroom_master_lights', 'light.bathroom_upstairs_lights', 'light.bathroom_downstairs_lights')
+             AND s.last_updated_ts >= p.ws - 86400
+             AND s.last_updated_ts <  p.ws + 21600 + 120
+        ),
+        b AS (
+          SELECT s.start_ts AS ts,
+                 s."sum" - LAG(s."sum") OVER (ORDER BY s.start_ts) AS d
+            FROM statistics_short_term s
+            JOIN statistics_meta m ON s.metadata_id = m.id, p
+           WHERE m.statistic_id = 'sensor.water_meter_total'
+             AND s.start_ts >= p.ws - 300
+             AND s.start_ts <  p.ws + 21600
+        )
+        SELECT (SELECT COUNT(DISTINCT CAST((f.t - p.ws) / 3600 AS INTEGER))
+                  FROM f, p
+                 WHERE NOT EXISTS (SELECT 1 FROM l
+                                    WHERE l.st = 'on' AND l.a <= f.t + 120 AND l.z >= f.t - 120)
+               ) AS unexplained_hours,
+               (SELECT COUNT(DISTINCT CAST((f.t - p.ws) / 3600 AS INTEGER)) FROM f, p) AS active_hours,
+               (SELECT ROUND(SUM(b.d), 2) FROM b, p WHERE b.ts >= p.ws) AS volume
+    response_variable: sql_result
+  - if:
+      - condition: template
+        note: Alert if water ran unexplained in at least 5 of the 6 overnight hours.
+        value_template: "{{ sql_result['result'][0]['unexplained_hours'] | int(0) >= 5 }}"
+    then:
+      - action: notify.nikos
+        data:
+          title: 🚽 Water ran all night
+          message: >-
+            {% set row = sql_result['result'][0] %}
+            Water ran in {{ row['unexplained_hours'] }} of the 6 hours between midnight and
+            6 am with no bathroom light on ({{ row['volume'] }} gal overnight in total).
+            A toilet that refills on its own is the usual cause: put a few drops of food
+            coloring in the tank, and if it shows in the bowl without flushing, the flapper leaks.
+mode: single
+```
+
+- A flow reading counts as explained if one of the listed bathroom lights was on within 2
+  minutes of it. Lights in the kitchen are deliberately left out: a light left on there would
+  hide a leak for hours, and toilets are in bathrooms.
+- It runs at 06:10 rather than 06:00 because the last 5-minute statistics period is compiled at 06:00.
+- Check your own nights before choosing the threshold. Here the worst night had 4 unexplained
+  hours, from someone up early in the kitchen plus a bathroom whose light is not in the list.
 
 ### Daily Usage Alert
 
