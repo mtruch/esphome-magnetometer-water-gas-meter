@@ -255,8 +255,8 @@ Algorithm | Best For
 - Works with a single sensor on any multipole magnet (unlike two-sensor setups placed 90° apart around the meter body, which land 180° out of phase on 4-pole magnets; see [Discussion #132](https://github.com/tronikos/esphome-magnetometer-water-gas-meter/discussions/132))
 - Decodes 4 evenly spaced 90° Gray-code steps per cycle: forward motion adds and reverse motion subtracts, so disc rocking from plumbing thermal expansion and contraction cancels out instead of accumulating as phantom usage
 - Commits 1 count per 4 net forward steps (keeping `volume_per_half_rotation` unchanged), clamps published `Total` to its high-water mark so Home Assistant's `total_increasing` statistics never see a decrease as a meter reset, updates `Flow` on every new forward 90° step for 4x faster slow-leak detection, and reports **Flow Direction** (`Forward`, `Reverse`, `Stopped`)
-- Automatically falls back to the 1-axis **Adaptive** algorithm if selected before 3-axis calibration or if secondary axes lack sufficient quadrature signal
-- Requires at least 4 samples per magnetic cycle (vs. 2 for Adaptive), which halves the maximum flow rate ceiling (~33–50 cycles/s at 200 Hz on ESP32, or ~32–47 GPM on a 3/4" Badger 35)
+- Automatically falls back to the 1-axis **Adaptive** algorithm if selected before 3-axis calibration, if secondary axes lack sufficient quadrature signal, or if **Axis** is manually changed away from the calibrated primary axis (reporting `Ready (1-axis fallback)` on **Calibration Status**)
+- Requires at least 4 samples per magnetic cycle (vs. 2 for Adaptive), which halves the maximum flow rate ceiling (~33–50 cycles/s at 200 Hz on ESP32 with QMC5883L/QMC5883P, or ~32–47 GPM on a 3/4" Badger 35; sensors with lower output rates such as HMC5883L at 75 Hz max or MLX90393 at ~65 Hz scale this ceiling down proportionally)
 
 **Adaptive algorithm**:
 
@@ -317,7 +317,7 @@ Model | Size | Pulses per gal | Pulses per ft³ | Pulses per L | `volume_per_hal
 170 RCDL | 2" | 14.565 | 108.955 | 3.848 | `0.13731548` gal
 
 The 55 and 70 are both 1", so pick the row by the size stamped on the meter, not by the model.
-For another `volume_unit` divide 2 by the matching column: a 35 RCDL in ft³ is `2 / 947.566`.
+For another `volume_unit` divide 2 by the matching column: a 25 RCDL in ft³ is `2 / 1484.689` (`0.00134708`), and a 35 RCDL in ft³ is `2 / 947.566` (`0.00211067`).
 
 If you have the Flume water sensor you can use its lowest reported value. You can find it with:
 `select min(min) from statistics_short_term, statistics_meta where statistics_meta.statistic_id = 'sensor.water_usage_current' and statistics_meta.id = metadata_id and min > 0;`
